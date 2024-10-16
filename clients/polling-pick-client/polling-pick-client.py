@@ -61,8 +61,10 @@ class App(seiscomp.client.Application):
         def pt(p):
             return p.time().value()
 
-        items_due = [i for i in self.request.values() if float(now - pt(i.pick)) > self.afterP]
-        seiscomp.logging.debug("picks due %d" % (len(items_due),))
+        request_items_due = [
+                i for i in self.request.values()
+                if float(now - pt(i.pick)) > self.after_p ]
+        seiscomp.logging.debug("picks due %d" % (len(request_items_due),))
 
         # This is a brute-force request: Try and see what we get.
         #
@@ -75,11 +77,11 @@ class App(seiscomp.client.Application):
         stream.setTimeout(stream_timeout)
         stream_count = 0
 
-        for item in items_due:
-            n, s, l, c = item.nslc
-            t1 = item.start_time
-            t2 = item.end_time
-            for comp in item.components:
+        for request_item in request_items_due:
+            n, s, l, c = request_item.nslc
+            t1 = request_item.start_time
+            t2 = request_item.end_time
+            for comp in request_item.components:
                 stream.addStream(n, s, "" if l == "--" else l, c+comp, t1, t2)
                 stream_count += 1
 
@@ -92,16 +94,13 @@ class App(seiscomp.client.Application):
         for rec in scstuff.util.RecordIterator(stream, showprogress=True):
             if rec is None:
                 break
-            n = rec.networkCode()
-            s = rec.stationCode()
-            l = rec.locationCode()
-            c = rec.channelCode()
+            nslc = scstuff.util.nslc(rec)
             # "raw" nslc
-            nslc = n, s, l, c
             if nslc not in waveforms:
                 waveforms[nslc] = []
             waveforms[nslc].append(rec)
 
+            n, s, l, c = nslc
             c, comp = c[:-1], c[-1]
             nslc = n, s, "--" if l=="" else l, c
             if nslc not in end_time:
@@ -119,45 +118,48 @@ class App(seiscomp.client.Application):
         seiscomp.logging.debug(
             "RecordStream: request lasted %.3f seconds" % (dt))
 
-        finished_items = []
+        finished_request_items = []
         for pickID in self.request:
-            item = self.request[pickID]
+            request_item = self.request[pickID]
             finished = True
-            if item.nslc in end_time:
-                for comp in item.components:
-                    if item.nslc not in end_time:
+            if request_item.nslc in end_time:
+                for comp in request_item.components:
+                    if request_item.nslc not in end_time:
                         # No record received (yet) for requested stream
                         finished = False
                         break
-                    if comp not in end_time[item.nslc]:
+                    if comp not in end_time[request_item.nslc]:
                         # No record received (yet) for requested component
                         finished = False
                         break
-                    if end_time[item.nslc][comp] < item.end_time:
+                    if end_time[request_item.nslc][comp] < request_item.end_time:
                         # if *any* of the components is unfinished
                         finished = False
                         break
                 if finished:
-                    item.finished = True
+                    request_item.finished = True
 
-            if item.finished:
-                finished_items.append(item)
+            if request_item.finished:
+                finished_request_items.append(request_item)
 
-        for item in finished_items:
-            pickID = item.pick.publicID()
+        for request_item in finished_request_items:
+            pickID = request_item.pick.publicID()
             seiscomp.logging.debug("%s finished" % (pickID,))
             del self.request[pickID]
 
-        expired_items = [i for i in self.request.values() if now > i.expires]
-        for item in expired_items:
-            pickID = item.pick.publicID()
+        expired_request_items = [
+            i for i in self.request.values()
+            if now > i.expires]
+        for request_item in expired_request_items:
+            pickID = request_item.pick.publicID()
             seiscomp.logging.debug("%s expired" % (pickID,))
-            for comp in item.components:
-                if comp not in end_time[item.nslc]:
+            for comp in request_item.components:
+                if comp not in end_time[request_item.nslc]:
                     seiscomp.logging.debug("  %s no data" % (comp,))
                     continue
-                t2 = end_time[item.nslc][comp]
-                seiscomp.logging.debug("  %s %s" % (comp, scstuff.util.isotimestamp(t2)))
+                t2 = end_time[request_item.nslc][comp]
+                t2 = scstuff.util.isotimestamp(t2)
+                seiscomp.logging.debug("  %s %s" % (comp, t2))
             del self.request[pickID]
 
         seiscomp.logging.debug("%d pending request items" % (len(self.request)))
@@ -165,11 +167,7 @@ class App(seiscomp.client.Application):
     def processPick(self, pick):
         seiscomp.logging.debug("pick %s" % (pick.publicID(),))
         pickID = pick.publicID()
-        wfid = pick.waveformID()
-        n = wfid.networkCode()
-        s = wfid.stationCode()
-        l = wfid.locationCode()
-        c = wfid.channelCode()
+        n, s, l, c = scstuff.util.nslc(pick.waveformID())
 
         nslc = (n, s, "--" if l=="" else l, c[:2])
 
@@ -182,15 +180,15 @@ class App(seiscomp.client.Application):
             return
 
         now = seiscomp.core.Time.GMT()
-        item = RequestItem()
-        item.expires = now + seiscomp.core.TimeSpan(self.expire_after)
-        item.pick = pick
-        item.nslc = nslc
-        item.components = self.components[nslc]
-        item.start_time = t1
-        item.end_time = t2
-        item.finished = False
-        self.request[pickID] = item
+        request_item = RequestItem()
+        request_item.expires = now + seiscomp.core.TimeSpan(self.expire_after)
+        request_item.pick = pick
+        request_item.nslc = nslc
+        request_item.components = self.components[nslc]
+        request_item.start_time = t1
+        request_item.end_time = t2
+        request_item.finished = False
+        self.request[pickID] = request_item
 
     def handleTimeout(self):
         # The timeout interval can be configured via timeout_interval
@@ -205,6 +203,7 @@ class App(seiscomp.client.Application):
     def run(self):
         self.enableTimer(timeout_interval)
         return super().run()
+
 
 def main():
     app = App(len(sys.argv), sys.argv)

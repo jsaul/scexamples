@@ -24,16 +24,16 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
 
     def __init__(self, argc, argv):
         seiscomp.client.StreamApplication.__init__(self, argc, argv)
-        self.setMessagingEnabled(True)
+        self.setMessagingEnabled(False)
         self.setLoadInventoryEnabled(True)
 
-        # we need the config to determine which streams are used for picking
+        # We need the config to determine which streams are used for picking
         self.setLoadConfigModuleEnabled(True)
 
-        self.setRecordStreamEnabled(True)
         self.setRecordInputHint(seiscomp.core.Record.SAVE_RAW)
 
-        self.addMessagingSubscription("PICK")
+        # Time for which we buffer the data in seconds
+        self.buffer_length = 3600.
 
         # This is the time window that we request for each repick.
         # Depending on the use case this may be shorter (or longer)
@@ -55,7 +55,11 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
         self.buffer = dict()
         self.end_time = dict()
 
-        self.last_cleanup = seiscomp.core.Time.GMT()
+        self.cleanup_interval = 120.
+        self.next_cleanup = seiscomp.core.Time.GMT() + seiscomp.core.TimeSpan(self.cleanup_interval)
+
+    def setBufferLength(self, seconds):
+        self.buffer_length = seconds
 
     def handleRecord(self, rec):
         """
@@ -66,19 +70,22 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
         # This hack is required in order to acquire the ownership
         # of the record and also increase the reference count by 1.
         rec = seiscomp.core.Record.Cast(rec)
-        nslc = rec.networkCode(), rec.stationCode(), rec.locationCode(), rec.channelCode()
+        nslc = scstuff.util.nslc(rec)
         n, s, l, c = nslc
         if l == "":
             l = "--"
         c, comp = c[:-1], c[-1]
         nslc = n, s, l, c
 
+        # Find the right buffer
         if nslc not in self.buffer:
             self.buffer[nslc] = dict()
         if comp not in self.buffer[nslc]:
             self.buffer[nslc][comp] = list()
+        # Store record
         self.buffer[nslc][comp].append(rec)
 
+        # Update end time for this stream
         if nslc not in self.end_time:
             self.end_time[nslc] = dict()
         if comp not in self.end_time[nslc]:
@@ -90,47 +97,55 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
             # Nothing to do
             return
 
-        for item in self.request_by_nslc[nslc]:
+        # See if a data request for this stream is complete
+        for request_item in self.request_by_nslc[nslc]:
             finished = True
             for comp in self.end_time[nslc]:
-                if self.end_time[nslc][comp] < item.end_time:
+                if self.end_time[nslc][comp] < request_item.end_time:
                     finished = False
             if finished:
-                item.finished = True
-                item.data = dict()
+                request_item.finished = True
+                request_item.data = dict()
                 for comp in self.buffer[nslc]:
-                    item.data[comp] = [
+                    request_item.data[comp] = [
                         r for r in self.buffer[nslc][comp]
-                        if r.endTime() >= item.start_time and r.startTime() <= item.end_time]
+                        if r.endTime()   >= request_item.start_time and \
+                           r.startTime() <= request_item.end_time]
 
-                self.processData(item)
+                self.processData(request_item)
 
-                self.request_by_nslc[item.nslc].remove(item)
-                del self.request[item.pick.publicID()]
+                self.request_by_nslc[request_item.nslc].remove(request_item)
+                del self.request[request_item.pick.publicID()]
 
-        self.cleanup()
+        self.cleanup_all()
 
     def processData(self, request_item):
         seiscomp.logging.info("Working with " + request_item.pick.publicID())
 
-    def cleanup(self, keep=3600):
+    def cleanup_stream(self, nslc):
+        end_time = None
+        for comp in self.buffer[nslc]:
+            t = self.buffer[nslc][comp][-1].endTime()
+            if end_time is None or t < end_time:
+                end_time = t
+        start_time = end_time - seiscomp.core.TimeSpan(self.buffer_length)
+        for comp in self.buffer[nslc]:
+            buf = self.buffer[nslc][comp]
+            self.buffer[nslc][comp] = [
+                    r for r in buf
+                    if r.endTime() > start_time ]
+
+    def cleanup_all(self):
+        """ Trim all the waveform buffers """
         now = seiscomp.core.Time.GMT()
 
-        if float(now - self.last_cleanup) < 120:
+        if now < self.next_cleanup:
             return
 
         for nslc in self.buffer:
-            end_time = None
-            for comp in self.buffer[nslc]:
-                t = self.buffer[nslc][comp][-1].endTime()
-                if end_time is None or t < end_time:
-                    end_time = t
-            start_time = end_time - seiscomp.core.TimeSpan(keep)
-            for comp in self.buffer[nslc]:
-                buf = self.buffer[nslc][comp]
-                self.buffer[nslc][comp] = [ r for r in buf if r.endTime() > start_time ]
+            self.cleanup_stream(nslc)
 
-        self.last_cleanup = now
+        self.next_cleanup = now + seiscomp.core.TimeSpan(self.cleanup_interval)
 
     def init(self):
         if not super().init():
@@ -147,7 +162,9 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
             self.inventory, now,
             net_sta_blacklist=global_net_sta_blacklist)
 
+        # start acquisition one hour ago
         tstart = now + seiscomp.core.TimeSpan(-3600)
+
         self.recordStream().setTimeout(300)
         self.recordStream().setStartTime(tstart)
 
@@ -164,11 +181,7 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
     def processPick(self, pick):
         seiscomp.logging.debug("pick %s" % (pick.publicID(),))
         pickID = pick.publicID()
-        wfid = pick.waveformID()
-        n = wfid.networkCode()
-        s = wfid.stationCode()
-        l = wfid.locationCode()
-        c = wfid.channelCode()
+        n, s, l, c = scstuff.util.nslc(pick.waveformID())
         nslc = (n, s, "--" if l=="" else l, c[:2])
 
         t0 = pick.time().value()
@@ -180,18 +193,18 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
             return
 
         now = seiscomp.core.Time.GMT()
-        item = RequestItem()
-        item.expires = now + seiscomp.core.TimeSpan(self.expire_after)
-        item.pick = pick
-        item.nslc = nslc
-        item.components = self.components[nslc]
-        item.start_time = t1
-        item.end_time = t2
-        item.finished = False
-        self.request[pickID] = item
+        request_item = RequestItem()
+        request_item.expires = now + seiscomp.core.TimeSpan(self.expire_after)
+        request_item.pick = pick
+        request_item.nslc = nslc
+        request_item.components = self.components[nslc]
+        request_item.start_time = t1
+        request_item.end_time = t2
+        request_item.finished = False
+        self.request[pickID] = request_item
         if nslc not in self.request_by_nslc:
             self.request_by_nslc[nslc] = list()
-        self.request_by_nslc[nslc].append(item)
+        self.request_by_nslc[nslc].append(request_item)
 
     def addObject(self, parentID, obj):
         # called if a new object is received
@@ -209,6 +222,8 @@ class WaveformDumperApp(StreamBufferApp):
 
     def __init__(self, argc, argv):
         super().__init__(argc, argv)
+        self.setMessagingEnabled(True)
+        self.addMessagingSubscription("PICK")
 
         self.request_item_count = 0
 
@@ -248,6 +263,7 @@ class WaveformDumperApp(StreamBufferApp):
                 self.request_item_count = int(last)
             except IndexError:
                 self.request_item_count = 0
+
         return True
 
     def processData(self, request_item):
