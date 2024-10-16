@@ -9,22 +9,12 @@ import scdlpicker.util as _util
 import scdlpicker.inventory as _inventory
 
 
-# The acquisition will wait that long to finalize the acquisition
-# of waveform time windows. The processing may be interrupted that
-# long!
-streamTimeout = 5
-
-# Normally no need to change this
-timeoutInterval = 30
-
-# This is the working directory where all the event data are written to.
-workingDir = "~/scdlpicker"
-
 # We need a more convenient config for that:
 global_net_sta_blacklist = [
     # bad components
     ("WA", "ZON"),
 ]
+
 
 class RequestItem:
     pass
@@ -44,9 +34,6 @@ class App(seiscomp.client.StreamApplication):
         self.setRecordInputHint(seiscomp.core.Record.SAVE_RAW)
 
         self.addMessagingSubscription("PICK")
-
-        # adopt the defaults from the top of this script
-        self.workingDir = workingDir
 
         # This is the time window that we request for each repick.
         # Depending on the use case this may be shorter (or longer)
@@ -281,9 +268,6 @@ class App(seiscomp.client.StreamApplication):
         if pick:
             self.processPick(pick)
 
-    def run(self):
-#       self.enableTimer(timeoutInterval)
-        return super(App, self).run()
 
 def main():
     app = App(len(sys.argv), sys.argv)

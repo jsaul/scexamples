@@ -9,13 +9,10 @@ import scdlpicker.inventory as _inventory
 # The acquisition will wait that long to finalize the acquisition
 # of waveform time windows. The processing may be interrupted that
 # long!
-streamTimeout = 5
+stream_timeout = 5
 
 # Normally no need to change this
-timeoutInterval = 30
-
-# This is the working directory where all the event data are written to.
-workingDir = "~/scdlpicker"
+timeout_interval = 30
 
 # We need a more convenient config for that:
 global_net_sta_blacklist = [
@@ -36,14 +33,11 @@ class App(seiscomp.client.Application):
         self.setRecordStreamEnabled(True)
         self.addMessagingSubscription("PICK")
 
-        # adopt the defaults from the top of this script
-        self.workingDir = workingDir
-
         # This is the time window that we request for each repick.
         # Depending on the use case this may be shorter (or longer)
         self.beforeP = 120.
         self.afterP = 240.
-        self.expireAfter = 1800.
+        self.expire_after = 1800.
 
         self.request = dict()
 
@@ -77,22 +71,22 @@ class App(seiscomp.client.Application):
         t_begin_request = time.time()
         seiscomp.logging.info("Opening RecordStream "+self.recordStreamURL())
         stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
-        stream.setTimeout(streamTimeout)
-        streamCount = 0
+        stream.setTimeout(stream_timeout)
+        stream_count = 0
 
         for item in items_due:
             n, s, l, c = item.nslc
-            t1 = item.startTime
-            t2 = item.endTime
+            t1 = item.start_time
+            t2 = item.end_time
             for comp in item.components:
                 stream.addStream(n, s, "" if l == "--" else l, c+comp, t1, t2)
-                streamCount += 1
+                stream_count += 1
 
         waveforms = dict()
-        endtime = dict()
+        end_time = dict()
 
         seiscomp.logging.info(
-            "RecordStream: requesting %d streams" % streamCount)
+            "RecordStream: requesting %d streams" % stream_count)
         count = 0
         for rec in _util.RecordIterator(stream, showprogress=True):
             if rec is None:
@@ -109,18 +103,18 @@ class App(seiscomp.client.Application):
 
             c, comp = c[:-1], c[-1]
             nslc = n, s, "--" if l=="" else l, c
-            if nslc not in endtime:
-                endtime[nslc] = dict()
-            if comp not in endtime[nslc]:
-                endtime[nslc][comp] = rec.endTime()
-            if rec.endTime() > endtime[nslc][comp]:
-                    endtime[nslc][comp] = rec.endTime()
+            if nslc not in end_time:
+                end_time[nslc] = dict()
+            if comp not in end_time[nslc]:
+                end_time[nslc][comp] = rec.endTime()
+            if rec.endTime() > end_time[nslc][comp]:
+                    end_time[nslc][comp] = rec.endTime()
             count += 1
 
         seiscomp.logging.debug(
             "RecordStream: received %d records" % (count,))
         t_end_request = time.time()
-        dt = t_end_request-t_begin_request
+        dt = t_end_request - t_begin_request
         seiscomp.logging.debug(
             "RecordStream: request lasted %.3f seconds" % (dt))
 
@@ -128,17 +122,17 @@ class App(seiscomp.client.Application):
         for pickID in self.request:
             item = self.request[pickID]
             finished = True
-            if item.nslc in endtime:
+            if item.nslc in end_time:
                 for comp in item.components:
-                    if item.nslc not in endtime:
+                    if item.nslc not in end_time:
                         # No record received (yet) for requested stream
                         finished = False
                         break
-                    if comp not in endtime[item.nslc]:
+                    if comp not in end_time[item.nslc]:
                         # No record received (yet) for requested component
                         finished = False
                         break
-                    if endtime[item.nslc][comp] < item.endTime:
+                    if end_time[item.nslc][comp] < item.end_time:
                         # if *any* of the components is unfinished
                         finished = False
                         break
@@ -158,10 +152,10 @@ class App(seiscomp.client.Application):
             pickID = item.pick.publicID()
             seiscomp.logging.debug("%s expired" % (pickID,))
             for comp in item.components:
-                if comp not in endtime[item.nslc]:
+                if comp not in end_time[item.nslc]:
                     seiscomp.logging.debug("  %s no data" % (comp,))
                     continue
-                t2 = endtime[item.nslc][comp]
+                t2 = end_time[item.nslc][comp]
                 seiscomp.logging.debug("  %s %s" % (comp, _util.isotimestamp(t2)))
             del self.request[pickID]
 
@@ -188,17 +182,17 @@ class App(seiscomp.client.Application):
 
         now = seiscomp.core.Time.GMT()
         item = RequestItem()
-        item.expires = now + seiscomp.core.TimeSpan(self.expireAfter)
+        item.expires = now + seiscomp.core.TimeSpan(self.expire_after)
         item.pick = pick
         item.nslc = nslc
         item.components = self.components[nslc]
-        item.startTime = t1
-        item.endTime = t2
+        item.start_time = t1
+        item.end_time = t2
         item.finished = False
         self.request[pickID] = item
 
     def handleTimeout(self):
-        # The timeout interval can be configured via timeoutInterval
+        # The timeout interval can be configured via timeout_interval
         self.processPendingPicks()
 
     def addObject(self, parentID, obj):
@@ -208,7 +202,7 @@ class App(seiscomp.client.Application):
             self.processPick(pick)
 
     def run(self):
-        self.enableTimer(timeoutInterval)
+        self.enableTimer(timeout_interval)
         return super(App, self).run()
 
 def main():
