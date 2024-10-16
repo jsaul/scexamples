@@ -20,7 +20,7 @@ class RequestItem:
     pass
 
 
-class App(seiscomp.client.StreamApplication):
+class StreamBufferApp(seiscomp.client.StreamApplication):
 
     def __init__(self, argc, argv):
         seiscomp.client.StreamApplication.__init__(self, argc, argv)
@@ -55,31 +55,7 @@ class App(seiscomp.client.StreamApplication):
         self.buffer = dict()
         self.end_time = dict()
 
-        self.export_d = None
-        self.item_count = 0
-
         self.last_cleanup = seiscomp.core.Time.GMT()
-
-    def createCommandLineDescription(self):
-        self.commandline().addGroup("Config")
-        self.commandline().addStringOption(
-            "Config", "export-dir,d", "path of the export directory")
-
-    def validateParameters(self):
-        """
-        Command-line parameters
-        """
-        if not super(App, self).validateParameters():
-            return False
-
-        try:
-            self.export_d = self.commandline().optionString("export-dir")
-        except RuntimeError:
-            pass
-        if self.export_d is not None:
-            self.export_d = pathlib.Path(self.export_d).expanduser()
-
-        return True
 
     def handleRecord(self, rec):
         """
@@ -127,51 +103,15 @@ class App(seiscomp.client.StreamApplication):
                         r for r in self.buffer[nslc][comp]
                         if r.endTime() >= item.start_time and r.startTime() <= item.end_time]
 
-                self.workWith(item)
+                self.processData(item)
 
                 self.request_by_nslc[item.nslc].remove(item)
                 del self.request[item.pick.publicID()]
 
         self.cleanup()
 
-    def workWith(self, request_item):
+    def processData(self, request_item):
         seiscomp.logging.info("Working with " + request_item.pick.publicID())
-
-        if self.export_d is not None:
-            overwrite = False
-
-            self.item_count += 1
-            path = self.export_d / ("%09d" % self.item_count)
-            path.mkdir(parents=True, exist_ok=True)
-            n, s, l, c = request_item.nslc
-            basename = "%s.%s.%s.%s" % (n, s, "" if l=="--" else l, c)
-            for comp in request_item.components:
-                if not comp in request_item.data:
-                    continue
-                mseed_filename = path / (basename + comp + ".mseed")
-                if mseed_filename.exists() and not overwrite:
-                    continue
-                with open(mseed_filename, "wb") as f:
-                    for rec in request_item.data[comp]:
-                        f.write(rec.raw().str())
-
-            # Dump pick to XML
-            xml_filename = str(path / "pick.xml")
-            ep = seiscomp.datamodel.EventParameters()
-            ep.add(request_item.pick)
-            ar = seiscomp.io.XMLArchive()
-            ar.setFormattedOutput(True)
-            ar.create(xml_filename)
-            ar.writeObject(ep)
-            ar.close()
-
-        # Count items still in the request queue
-        count_1 = len(self.request)
-        count_2 = 0
-        for nslc in self.request_by_nslc:
-            count_2 += len(self.request_by_nslc[nslc])
-        assert count_1 == count_2
-        seiscomp.logging.debug("Pending %d items" % (count_1,))
 
     def cleanup(self, keep=3600):
         now = seiscomp.core.Time.GMT()
@@ -193,7 +133,7 @@ class App(seiscomp.client.StreamApplication):
         self.last_cleanup = now
 
     def init(self):
-        if not super(App, self).init():
+        if not super().init():
             return False
         
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
@@ -202,14 +142,6 @@ class App(seiscomp.client.StreamApplication):
         myName = self.name()
         self.configuredStreams = \
                 _util.configuredStreams(configModule, myName)
-
-        if self.export_d is not None and self.export_d.exists():
-            try:
-                # continue with the export directory numbering
-                last = sorted(self.export_d.glob("0*"))[-1].name
-                self.item_count = int(last)
-            except IndexError:
-                self.item_count = 0
 
         now = seiscomp.core.Time.GMT()
         self.components = _inventory.streamComponents(
@@ -269,8 +201,98 @@ class App(seiscomp.client.StreamApplication):
             self.processPick(pick)
 
 
+class WaveformDumperApp(StreamBufferApp):
+    """
+    Based on the StreamBufferApp, this class implements dumping of waveforms
+    to numbered directories for each incoming pick, along with an XML file
+    containing the information about the pick itself.
+    """
+
+    def __init__(self, argc, argv):
+        super().__init__(argc, argv)
+
+        self.request_item_count = 0
+
+        self.export_d = None
+
+    def createCommandLineDescription(self):
+        super().createCommandLineDescription()
+
+        self.commandline().addGroup("Config")
+        self.commandline().addStringOption(
+            "Config", "export-dir,d", "path of the export directory")
+
+    def validateParameters(self):
+        """
+        Command-line parameters
+        """
+        if not super().validateParameters():
+            return False
+
+        try:
+            self.export_d = self.commandline().optionString("export-dir")
+        except RuntimeError:
+            pass
+        if self.export_d is not None:
+            self.export_d = pathlib.Path(self.export_d).expanduser()
+
+        return True
+
+    def init(self):
+        if not super().init():
+            return False
+        
+        if self.export_d is not None and self.export_d.exists():
+            try:
+                # continue with the export directory numbering
+                last = sorted(self.export_d.glob("0*"))[-1].name
+                self.request_item_count = int(last)
+            except IndexError:
+                self.request_item_count = 0
+        return True
+
+    def processData(self, request_item):
+        super().processData(request_item)
+
+        if self.export_d is not None:
+            overwrite = False
+
+            self.request_item_count += 1
+            path = self.export_d / ("%09d" % self.request_item_count)
+            path.mkdir(parents=True, exist_ok=True)
+            n, s, l, c = request_item.nslc
+            basename = "%s.%s.%s.%s" % (n, s, "" if l=="--" else l, c)
+            for comp in request_item.components:
+                if not comp in request_item.data:
+                    continue
+                mseed_filename = path / (basename + comp + ".mseed")
+                if mseed_filename.exists() and not overwrite:
+                    continue
+                with open(mseed_filename, "wb") as f:
+                    for rec in request_item.data[comp]:
+                        f.write(rec.raw().str())
+
+            # Dump pick to XML
+            xml_filename = str(path / "pick.xml")
+            ep = seiscomp.datamodel.EventParameters()
+            ep.add(request_item.pick)
+            ar = seiscomp.io.XMLArchive()
+            ar.setFormattedOutput(True)
+            ar.create(xml_filename)
+            ar.writeObject(ep)
+            ar.close()
+
+        # Count items still in the request queue
+        count_1 = len(self.request)
+        count_2 = 0
+        for nslc in self.request_by_nslc:
+            count_2 += len(self.request_by_nslc[nslc])
+        assert count_1 == count_2
+        seiscomp.logging.debug("Pending %d items" % (count_1,))
+
+
 def main():
-    app = App(len(sys.argv), sys.argv)
+    app = WaveformDumperApp(len(sys.argv), sys.argv)
     app()
 
 
