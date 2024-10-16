@@ -5,13 +5,13 @@ import seiscomp.client
 import seiscomp.datamodel
 import seiscomp.io
 
-import scdlpicker.util as _util
-import scdlpicker.inventory as _inventory
+import scstuff.util
+import scstuff.inventory
 
 
 # We need a more convenient config for that:
 global_net_sta_blacklist = [
-    # bad components
+    # bad component orientations
     ("WA", "ZON"),
 ]
 
@@ -37,8 +37,8 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
 
         # This is the time window that we request for each repick.
         # Depending on the use case this may be shorter (or longer)
-        self.beforeP = 120.
-        self.afterP = 240.
+        self.before_p = 120.
+        self.after_p = 240.
         self.expire_after = 1800.
 
         # Requests by pick ID. Only one request per pick ID.
@@ -139,12 +139,11 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
         configModule = self.configModule()
-        myName = self.name()
         self.configuredStreams = \
-                _util.configuredStreams(configModule, myName)
+            scstuff.util.configuredStreams(self.configModule(), self.name())
 
         now = seiscomp.core.Time.GMT()
-        self.components = _inventory.streamComponents(
+        self.components = scstuff.inventory.streamComponents(
             self.inventory, now,
             net_sta_blacklist=global_net_sta_blacklist)
 
@@ -173,8 +172,8 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
         nslc = (n, s, "--" if l=="" else l, c[:2])
 
         t0 = pick.time().value()
-        t1 = t0 + seiscomp.core.TimeSpan(-self.beforeP)
-        t2 = t0 + seiscomp.core.TimeSpan(+self.afterP)
+        t1 = t0 + seiscomp.core.TimeSpan(-self.before_p)
+        t2 = t0 + seiscomp.core.TimeSpan(+self.after_p)
         if nslc not in self.components:
             # This may occur if a station was (1) blacklisted or (2) added
             # to the processing later on. Either way we skip this pick.

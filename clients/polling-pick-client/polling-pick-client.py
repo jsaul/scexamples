@@ -3,8 +3,9 @@ import time
 import seiscomp.client
 import seiscomp.datamodel
 
-import scdlpicker.util as _util
-import scdlpicker.inventory as _inventory
+import scstuff.util
+import scstuff.inventory
+
 
 # The acquisition will wait that long to finalize the acquisition
 # of waveform time windows. The processing may be interrupted that
@@ -16,7 +17,7 @@ timeout_interval = 30
 
 # We need a more convenient config for that:
 global_net_sta_blacklist = [
-    # bad components
+    # bad component orientations
     ("WA", "ZON"),
 ]
 
@@ -35,20 +36,20 @@ class App(seiscomp.client.Application):
 
         # This is the time window that we request for each repick.
         # Depending on the use case this may be shorter (or longer)
-        self.beforeP = 120.
-        self.afterP = 240.
+        self.before_p = 120.
+        self.after_p = 240.
         self.expire_after = 1800.
 
         self.request = dict()
 
     def init(self):
-        if not super(App, self).init():
+        if not super().init():
             return False
         
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
         now = seiscomp.core.Time.GMT()
-        self.components = _inventory.streamComponents(
+        self.components = scstuff.inventory.streamComponents(
             self.inventory, now,
             net_sta_blacklist=global_net_sta_blacklist)
 
@@ -88,7 +89,7 @@ class App(seiscomp.client.Application):
         seiscomp.logging.info(
             "RecordStream: requesting %d streams" % stream_count)
         count = 0
-        for rec in _util.RecordIterator(stream, showprogress=True):
+        for rec in scstuff.util.RecordIterator(stream, showprogress=True):
             if rec is None:
                 break
             n = rec.networkCode()
@@ -156,7 +157,7 @@ class App(seiscomp.client.Application):
                     seiscomp.logging.debug("  %s no data" % (comp,))
                     continue
                 t2 = end_time[item.nslc][comp]
-                seiscomp.logging.debug("  %s %s" % (comp, _util.isotimestamp(t2)))
+                seiscomp.logging.debug("  %s %s" % (comp, scstuff.util.isotimestamp(t2)))
             del self.request[pickID]
 
         seiscomp.logging.debug("%d pending request items" % (len(self.request)))
@@ -173,8 +174,8 @@ class App(seiscomp.client.Application):
         nslc = (n, s, "--" if l=="" else l, c[:2])
 
         t0 = pick.time().value()
-        t1 = t0 + seiscomp.core.TimeSpan(-self.beforeP)
-        t2 = t0 + seiscomp.core.TimeSpan(+self.afterP)
+        t1 = t0 + seiscomp.core.TimeSpan(-self.before_p)
+        t2 = t0 + seiscomp.core.TimeSpan(+self.after_p)
         if nslc not in self.components:
             # This may occur if a station was (1) blacklisted or (2) added
             # to the processing later on. Either way we skip this pick.
@@ -203,7 +204,7 @@ class App(seiscomp.client.Application):
 
     def run(self):
         self.enableTimer(timeout_interval)
-        return super(App, self).run()
+        return super().run()
 
 def main():
     app = App(len(sys.argv), sys.argv)
