@@ -1,13 +1,41 @@
 # SeisComP clients
 
 SeisComP clients connect to the SeisComP messaging and usually retrieve objects via the messaging.
-Some clients also work with waveforms.
-These can be divided into streaming clients and clients that retrieve only on demand short time windows.
-Here we provide code skeletons for both.
 
-Both clients listen to pick objects from the messaging.
+As an example, a minimal client just retrieving picks from the messaging is provided.
+
+Some clients also work with waveforms, either by streaming continuous waveforms or by fetching specific time windows on demand.
+Here we provide code skeletons for both: polling-pick-client and streaming-pick-client.
+In the examples provided here, both clients listen to pick objects from the messaging.
 For each pick, short time windows of a few minutes around the pick times are retrieved for all three components according to the configuration.
-Use cases for this could be phase (re)picking, amplitude measurements or waveform modelling, provided we can work with only those streams for which the automatic picker produced picks.
+Either on demand (polling-pick-client) or from a buffered, continuous stream of waveforms.
+Use cases for this could include phase (re)picking, amplitude measurements or waveform modelling, provided we can work with only those streams for which the automatic picker produced picks.
+If also unpicked streams shall be retrieved, a different strategy is needed, like using arrival times predicted from an event location.
+
+The example clients provided here are
+
+- [**pick-client**](pick-client) a minimal client only *listening* for picks 
+- [**pick-sender**](pick-sender) a minimal client demonstrating how picks are *sent* via messaging
+- [**polling-pick-client**](polling-pick-client) is a client listening for picks and retrieving short time window on demand
+- [**streaming-pick-client**](streaming-pick-client) also listens for picks, but retrieves waveform time window from a continuous stream that is buffered for some time
+
+
+
+## pick-client
+
+This is a minimalistic script to demonstrate how to connect to the SeisComP messaging and to receive and process messages.
+It handles the very simple (nearly trivial) case of picks and amplitudes and the only thing is does is dump a few informations about the objects to stdout.
+If you want to do something else with the objects (likely you do...), then adopt the doSomethingWith*() methods accordingly.
+
+## pick-sender
+
+A simple SeisComP Python script for importing picks from a non-SeisComP picker, e.g. an existing legacy picker.
+
+Being only an example, the script simply reads "picks" produced by a dummy "picker" from standard input and sends it to a SeisComP messaging.
+Option --test enables test mode.
+
+In a real-world-interface, however, you likely have other, different information produced by the legacy picker.
+The parse() function will have to be adapted accordingly.
 
 
 ## polling-pick-client

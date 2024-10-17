@@ -50,7 +50,7 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
         self.request_by_nslc = dict()
 
         # This is the waveform buffer.
-        # There is one item per stream, with the stream's nslc used as key.
+        # There is one dict per stream, with the stream's nslc used as key.
         # Each item is another dict with the components stored in separate lists.
         self.buffer = dict()
         self.end_time = dict()
@@ -79,6 +79,7 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
 
         # Find the right buffer
         if nslc not in self.buffer:
+            # create a buffer for this stream
             self.buffer[nslc] = dict()
         if comp not in self.buffer[nslc]:
             self.buffer[nslc][comp] = list()
@@ -103,19 +104,22 @@ class StreamBufferApp(seiscomp.client.StreamApplication):
             for comp in self.end_time[nslc]:
                 if self.end_time[nslc][comp] < request_item.end_time:
                     finished = False
-            if finished:
-                request_item.finished = True
-                request_item.data = dict()
-                for comp in self.buffer[nslc]:
-                    request_item.data[comp] = [
-                        r for r in self.buffer[nslc][comp]
-                        if r.endTime()   >= request_item.start_time and \
-                           r.startTime() <= request_item.end_time]
+                    break
+            if not finished:
+                continue
 
-                self.processData(request_item)
+            request_item.finished = True
+            request_item.data = dict()
+            for comp in self.buffer[nslc]:
+                request_item.data[comp] = [
+                    r for r in self.buffer[nslc][comp]
+                    if r.endTime()   >= request_item.start_time and \
+                       r.startTime() <= request_item.end_time]
 
-                self.request_by_nslc[request_item.nslc].remove(request_item)
-                del self.request[request_item.pick.publicID()]
+            self.processData(request_item)
+
+            self.request_by_nslc[request_item.nslc].remove(request_item)
+            del self.request[request_item.pick.publicID()]
 
         self.cleanup_all()
 
