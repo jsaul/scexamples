@@ -18,7 +18,8 @@ global_net_sta_blacklist = [
 
 
 class RequestItem:
-    pass
+    def __init__(self):
+        self.finished = False
 
 
 class BufferingStreamApplication(seiscomp.client.StreamApplication):
@@ -413,7 +414,6 @@ class PickWaveformDumperApp(BufferingStreamApplication):
         request_item.components = self.components[nslc]
         request_item.start_time = t1
         request_item.end_time = t2
-        request_item.finished = False
         self.request[pickID] = request_item
         if nslc not in self.request_by_nslc:
             self.request_by_nslc[nslc] = list()
@@ -434,7 +434,6 @@ class PickWaveformDumperApp(BufferingStreamApplication):
             # acquisition end time
             if request_item.end_time < min(self.end_time[nslc].values()) - TimeSpan(0.5*self.buffer_length):
                 self.fetchArchiveData(request_item)
-        else:
 
     def addObject(self, parentID, obj):
         # called if a new object is received
