@@ -14,10 +14,10 @@ If also unpicked streams shall be retrieved, a different strategy is needed, lik
 
 The example clients provided here are
 
-- [**pick-client**](pick-client) a minimal client only *listening* for picks 
-- [**pick-sender**](pick-sender) a minimal client demonstrating how picks are *sent* via messaging
-- [**polling-pick-client**](polling-pick-client) is a client listening for picks and retrieving short time window on demand
-- [**streaming-pick-client**](streaming-pick-client) also listens for picks, but retrieves waveform time window from a continuous stream that is buffered for some time
+- [**pick-client**](messaging/pick-client) a minimal client only *listening* for picks 
+- [**pick-sender**](messaging/pick-sender) a minimal client demonstrating how picks are *sent* via messaging
+- [**polling-pick-client**](messaging+waveforms/polling-pick-client) is a client listening for picks and retrieving in demand short waveform time windows around the pick times
+- [**streaming-pick-client**](messaging+waveforms/streaming-pick-client) also listens for picks, but retrieves waveform time windows from a continuous stream that is buffered for some time
 
 
 
